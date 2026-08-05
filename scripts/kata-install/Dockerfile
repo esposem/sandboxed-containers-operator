@@ -2,7 +2,7 @@ FROM registry.access.redhat.com/ubi9/skopeo:9.8-1785444819
 
 RUN mkdir -p /scripts
 
-ADD osc-kata-install.sh osc-log-level.sh lib.sh osc-kata-addons-install.sh /scripts/
+ADD osc-kata-install.sh osc-log-level.sh lib.sh osc-kata-addons-install.sh coco-initrd.conf /scripts/
 
 # Multi-arch umoci support (amd64 and s390x)
 ARG TARGETARCH=amd64

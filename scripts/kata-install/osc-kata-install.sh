@@ -280,7 +280,12 @@ install_kata() {
 	# builds a host-kernel-derived initrd and symlinks the kernel. When
 	# packages were already present or the RPM postinstall scriptlet failed
 	# silently inside the DaemonSet chroot, these files may be missing.
-	if ! chroot /host test -e /var/cache/kata-containers/osbuilder-images/kata.kernel; then
+	#
+	# Skip osbuilder when CoCo initrds have been pre-installed from the
+	# initrd-builder image — they include their own kernel copy.
+	if chroot /host test -L /usr/share/kata-containers/osbuilder-images/kata-cc.initrd; then
+		echo "CoCo initrds detected, skipping kata-osbuilder.sh"
+	elif ! chroot /host test -e /var/cache/kata-containers/osbuilder-images/kata.kernel; then
 		echo "kata VM kernel/initrd missing, running kata-osbuilder.sh"
 		chroot /host mkdir -p /var/cache/kata-containers/osbuilder-images
 		chroot /host /usr/libexec/kata-containers/osbuilder/kata-osbuilder.sh
@@ -377,6 +382,12 @@ uninstall_kata() {
 	chroot /host systemctl restart crio
 	# Sleep to prevent pod restart while staged RPM removal awaits next reboot.
 	sleep infinity
+}
+
+is_tee_node() {
+	local node_labels
+	node_labels=$(kubectl get node "$NODE_NAME" -o jsonpath='{.metadata.labels}' 2>/dev/null) || return 1
+	echo "$node_labels" | grep -qE '"intel\.feature\.node\.kubernetes\.io/tdx":"true"|"amd\.feature\.node\.kubernetes\.io/snp":"true"|"ibm\.feature\.node\.kubernetes\.io/se":"true"'
 }
 
 get_cloud_provider() {
@@ -489,6 +500,14 @@ main() {
 
 		#/osc-log-level.sh "$action" "$LOG_LEVEL"
 
+		# If a TEE is detected on this node, load the CoCo initrd config
+		# and extract pre-built CoCo initrds before install_kata so that
+		# osbuilder is skipped in favour of the pre-built images.
+		if is_tee_node; then
+			source /scripts/coco-initrd.conf
+			/scripts/osc-kata-addons-install.sh install-initrds
+		fi
+
 		install_kata
 
 		# Install addon artifacts, if ADDON_IMAGE is present
@@ -502,6 +521,12 @@ main() {
 		client_tools
 
 		#/osc-log-level.sh "$action"
+
+		# Clean up CoCo initrds if they were installed
+		if is_tee_node; then
+			source /scripts/coco-initrd.conf
+			/scripts/osc-kata-addons-install.sh uninstall-initrds
+		fi
 
 		# Call addon uninstaller if configured
 		[ -n "${ADDON_IMAGE:-}" ] && /scripts/osc-kata-addons-install.sh uninstall
